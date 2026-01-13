@@ -15,8 +15,8 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [
-            python314
-            python314Packages.euporie
+            python313
+            python313Packages.euporie
           ];
         };
       });
