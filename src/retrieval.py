@@ -35,9 +35,16 @@ class MatchedVertex:
 
 
 @dataclass
+class Coface:
+    vertex_ids: list[int]
+    simplex_type: str  # "temporal" or "location"
+    meta_data: dict
+
+
+@dataclass
 class RetrievalResult:
     matched_vertices: list[MatchedVertex]
-    cofaces: list[list[int]]
+    cofaces: list[Coface]
     knowledge_gaps: list[list[int]]
     context_vertices: dict[int, str]  # vertex_id -> content
     edges: list[tuple[str, str, str]]  # (subject, relation, object)
@@ -78,15 +85,21 @@ class KnowledgeRetriever:
 
         # Step 2: Coface Lookup
         vertex_ids = [v.vertex_id for v in matched_vertices]
-        cofaces = self.simplex_tree.locate_cofaces(vertex_ids)
+        raw_cofaces = self.simplex_tree.locate_cofaces(vertex_ids, include_metadata=True)
+
+        # Convert to Coface objects
+        cofaces = [
+            Coface(vertex_ids=vids, simplex_type=stype, meta_data=meta)
+            for vids, stype, meta in raw_cofaces
+        ]
 
         # Collect all vertices in cofaces
         all_vertex_ids = set()
         for coface in cofaces:
-            all_vertex_ids.update(coface)
+            all_vertex_ids.update(coface.vertex_ids)
 
         # Step 3: Filtration Comparison (Gap Detection)
-        knowledge_gaps = self.detect_gaps(cofaces)
+        knowledge_gaps = self.detect_gaps([c.vertex_ids for c in cofaces])
 
         # Step 4: Build context
         context_vertices = self._get_vertex_contents(all_vertex_ids)
@@ -222,8 +235,21 @@ class KnowledgeRetriever:
         if result.cofaces:
             lines.append("\n=== Co-occurrence Patterns (Simplices) ===")
             for coface in result.cofaces[:10]:  # Limit to 10
-                contents = [result.context_vertices.get(vid, str(vid)) for vid in coface]
-                lines.append(f"  - {{{', '.join(contents)}}}")
+                contents = [result.context_vertices.get(vid, str(vid)) for vid in coface.vertex_ids]
+
+                # Format context based on simplex type
+                match coface.simplex_type:
+                    case "temporal":
+                        start = coface.meta_data.get("window_start", "?")
+                        end = coface.meta_data.get("window_end", "?")
+                        context = f"from {start} to {end}"
+                    case "location":
+                        loc = coface.meta_data.get("location", "?")
+                        context = f"at {loc}"
+                    case _:
+                        context = coface.simplex_type
+
+                lines.append(f"  - [{context}] {{{', '.join(contents)}}}")
 
         if result.edges:
             lines.append("\n=== Known Relationships ===")

@@ -347,7 +347,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Process search history into knowledge graph")
-    parser.add_argument("input", nargs="?", default="../search_history.json", help="Path to search_history.json")
+    parser.add_argument("input", nargs="?", default="search_history.json", help="Path to search_history.json")
     parser.add_argument("--db", default="knowledge_graph.db", help="Path to SQLite database")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of entries to process")
     parser.add_argument("--window", type=int, default=30, help="Temporal window size in minutes")

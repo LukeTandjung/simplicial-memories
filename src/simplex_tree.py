@@ -6,6 +6,7 @@ Original implementation used asyncpg (PostgreSQL), this uses sqlite3.
 
 import json
 import sqlite3
+from typing import Literal, overload
 
 
 class SimplexTree:
@@ -115,8 +116,29 @@ class SimplexTree:
             raise RuntimeError("No simplex vertex created")
         return current_parent
 
-    def locate_cofaces(self, vertex_ids: list[int]) -> list[list[int]]:
-        """Find all simplices containing vertex set. Complexity: O(k T log n)"""
+    @overload
+    def locate_cofaces(
+        self, vertex_ids: list[int], include_metadata: Literal[False] = False
+    ) -> list[list[int]]: ...
+
+    @overload
+    def locate_cofaces(
+        self, vertex_ids: list[int], include_metadata: Literal[True]
+    ) -> list[tuple[list[int], str, dict]]: ...
+
+    def locate_cofaces(
+        self, vertex_ids: list[int], include_metadata: bool = False
+    ) -> list[list[int]] | list[tuple[list[int], str, dict]]:
+        """
+        Find all simplices containing vertex set. Complexity: O(k T log n)
+
+        Args:
+            vertex_ids: Vertices that must be contained in the simplex
+            include_metadata: If True, return (vertices, type, meta_data) tuples
+
+        Returns:
+            List of vertex ID lists, or list of (vertices, type, meta_data) tuples
+        """
         if not vertex_ids:
             return []
 
@@ -126,7 +148,7 @@ class SimplexTree:
 
         candidates = self.conn.execute(
             """
-            SELECT node_id, depth FROM simplex_vertex
+            SELECT node_id, depth, type, meta_data FROM simplex_vertex
             WHERE user_id = ? AND vertex_id = ? AND depth >= ?
             """,
             (self.user_id, last_vertex, min_depth),
@@ -136,8 +158,18 @@ class SimplexTree:
         for candidate in candidates:
             path = self._collect_path(candidate["node_id"])
             if self._is_subsequence(vertex_ids, path):
-                cofaces.append(path)
-                cofaces.extend(self._collect_subtree(candidate["node_id"], path))
+                if include_metadata:
+                    cofaces.append((
+                        path,
+                        candidate["type"],
+                        json.loads(candidate["meta_data"]),
+                    ))
+                    cofaces.extend(self._collect_subtree(
+                        candidate["node_id"], path, include_metadata=True
+                    ))
+                else:
+                    cofaces.append(path)
+                    cofaces.extend(self._collect_subtree(candidate["node_id"], path))
 
         return cofaces
 
@@ -159,19 +191,32 @@ class SimplexTree:
         return list(reversed(vertices))
 
     def _collect_subtree(
-        self, root_id: int, root_verts: list[int]
-    ) -> list[list[int]]:
+        self,
+        root_id: int,
+        root_verts: list[int],
+        include_metadata: bool = False,
+    ) -> list[list[int]] | list[tuple[list[int], str, dict]]:
         """Collect all simplices in subtree."""
         children = self.conn.execute(
-            "SELECT node_id, vertex_id FROM simplex_vertex WHERE parent_id = ?",
+            "SELECT node_id, vertex_id, type, meta_data FROM simplex_vertex WHERE parent_id = ?",
             (root_id,),
         ).fetchall()
 
-        results = []
+        results: list = []
         for child in children:
             child_verts = root_verts + [child["vertex_id"]]
-            results.append(child_verts)
-            results.extend(self._collect_subtree(child["node_id"], child_verts))
+            if include_metadata:
+                results.append((
+                    child_verts,
+                    child["type"],
+                    json.loads(child["meta_data"]),
+                ))
+                results.extend(self._collect_subtree(
+                    child["node_id"], child_verts, include_metadata=True
+                ))
+            else:
+                results.append(child_verts)
+                results.extend(self._collect_subtree(child["node_id"], child_verts))
 
         return results
 
