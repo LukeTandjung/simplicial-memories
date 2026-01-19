@@ -1,31 +1,61 @@
-## Fabric's user understanding challenge
+# Simplicial Knowledge Graph
 
-The goal of this challenge is to see how you approach problem solving, especially when the “best practice” approach isn’t clear.
-Creating an accurate understanding of a user based on their online interactions is an open problem and we are looking for creative thinkers who can help us build the best user understanding in the world!
+A knowledge graph implementation using simplicial complexes for agent memory, based on the paper "Memory has Many Faces: Simplicial Complexes as Agent Memory Layers".
 
-### Before getting started
+## Project Structure
 
-Apply for this job only if:
-- building a great company is your top priority in life
-- you are extremely hard working and internally motivated
-- you expect the same level of dedication from the people you work with
-- you are happy working 7 days a week from our office in London
+```
+.
+├── paper/                      # Research paper and analysis
+│   ├── main.typ                # Paper source (Typst)
+│   └── simplex_representation.ipynb  # EDA and pipeline documentation
+│
+├── src/                        # Implementation
+│   ├── database.py             # SQLite connection and initialization
+│   ├── extraction.py           # Entity/relationship extraction via LLM
+│   ├── pipeline.py             # Extraction pipeline with checkpointing
+│   ├── retrieval.py            # Query pipeline (vertex matching, coface lookup, gap detection)
+│   ├── simplex_tree.py         # Simplex tree data structure
+│   ├── schema.sql              # Database schema
+│   ├── search_history.json     # Input data (Google Takeout export)
+│   └── pyproject.toml          # Python dependencies
+│
+├── flake.nix                   # Nix development environment
+└── README.md
+```
 
+## Setup
 
-### Few guidelines
+```bash
+cd src
+uv sync
+```
 
-- Spend **as much time as you need** to come up with something you are proud of.
-- The **thought process you followed** to arrive to the solution is even more important than the solution itself (only for this challenge tho). Do not polish the solution too much, instead make sure to clearly explain the **reasoning behind it**. If you try multiple approaches, make sure to **include all of them**, even if they lead to nothing.
-- You are **allowed any tool you want**. The fact that computers can now think though shouldn't be an excuse for you not to. If your solution can easily be reproduced by prompting an LLM, it will not be considered (we can prompt an LLM ourselves).
-- Solving 50% of the challenge in an interesting way is worth more than solving 100% of it in a dummy way.
-- Be verbose where it's needed: describing the approach and the reasoning behind it.
-- Be concise where it's needed: useless LLM generated comments are not welcome.
-- We will not execute your solution so make sure the notebook clearly shows the **output of your work**.
+Create a `.env` file in `src/` with your API key:
+```
+DEDALUS_API_KEY=your_key_here
+```
 
-### Getting started
+## Usage
 
-To get started, please clone this repo and check out the `challenge.ipynb` file. The file includes the challenge and a high level description of what we consider a **dummy** approach. Make sure your solution is **significantly** better that the dummy one.
+**Run extraction pipeline:**
+```bash
+cd src
+uv run python pipeline.py search_history.json --window 30 --delay 0.1
+```
 
-### Submit your solution
+**Query the knowledge graph:**
+```bash
+cd src
+uv run python retrieval.py "What hotel was I looking at in Jodhpur?" --top-k 10 --threshold 0.3
+```
 
-When you’re proud of your solution, send us a link to your repo. If you don’t feel like making your repo public, make a private one and invite @massimoalbarello.
+## How It Works
+
+1. **Extraction**: Search history entries are parsed, entities/relationships extracted via LLM, and stored as vertices/edges in SQLite.
+
+2. **Witness Complex Construction**: Entities that co-occur within temporal windows (30 min) or at the same location form simplices, capturing implicit relationships.
+
+3. **Retrieval**: Queries are embedded and matched to vertices. Coface lookup surfaces related entities from the same simplices. Gap detection identifies missing faces (uncertain inferences).
+
+See `paper/simplex_representation.ipynb` for detailed documentation.
