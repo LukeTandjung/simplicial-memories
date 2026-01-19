@@ -20,6 +20,7 @@
             python313Packages.git-filter-repo
             python313Packages.pydantic
             uv
+            ty
           ];
         };
       });
