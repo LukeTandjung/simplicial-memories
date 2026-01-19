@@ -1,3 +1,4 @@
 .direnv/
 main.typ
 .env
+.venv
