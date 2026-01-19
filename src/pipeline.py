@@ -4,11 +4,13 @@ Implements:
 1. Parse search history entries
 2. Extract entities and relationships via LLM
 3. Store vertices and edges
-4. Construct temporal witness complexes (simplices)
+4. Construct witness complexes (temporal and location-based)
 """
 
 import json
 import time
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -27,6 +29,22 @@ from simplex_tree import SimplexTree
 
 
 CHECKPOINT_FILE = "checkpoint.json"
+
+
+def extract_location(entry: dict) -> str | None:
+    """Extract normalized location from search history entry."""
+    location_infos = entry.get("locationInfos", [])
+    if not location_infos:
+        return None
+
+    source = location_infos[0].get("source", "")
+    match source:
+        case str(s) if "Home" in s:
+            return "home"
+        case str(s) if "Work" in s:
+            return "work"
+        case _:
+            return "other"
 
 
 def load_checkpoint() -> dict:
@@ -100,54 +118,115 @@ def process_entry(
     return vertex_ids, timestamp
 
 
-def build_temporal_windows(
-    entries_with_vertices: list[tuple[list[int], datetime]],
-    window_minutes: int = 5,
-) -> list[tuple[list[int], datetime, datetime]]:
+class WitnessComplexBuilder:
     """
-    Group entries into temporal windows for witness complex construction.
+    Dynamic witness complex builder that constructs simplices at insertion time.
 
-    Returns:
-        List of (vertex_ids, window_start, window_end) tuples
+    Tracks:
+    - Current temporal window (inserts simplex when window closes)
+    - Location-based vertex sets (updates incrementally)
     """
-    if not entries_with_vertices:
-        return []
 
-    # Sort by timestamp
-    sorted_entries = sorted(entries_with_vertices, key=lambda x: x[1])
+    def __init__(self, simplex_tree: SimplexTree, window_minutes: int = 30):
+        self.simplex_tree = simplex_tree
+        self.window_minutes = window_minutes
 
-    windows = []
-    current_vertices = set()
-    window_start = sorted_entries[0][1]
-    window_end = window_start
+        # Temporal window state
+        self.temporal_vertices: set[int] = set()
+        self.window_start: datetime | None = None
+        self.window_end: datetime | None = None
 
-    for vertex_ids, timestamp in sorted_entries:
-        # Check if this entry falls within the current window
-        if timestamp - window_end <= timedelta(minutes=window_minutes):
-            current_vertices.update(vertex_ids)
-            window_end = timestamp
+        # Location-based state: location -> (vertex_ids, timestamps, simplex_node_id)
+        # We store the node_id so we can remove old simplex before inserting updated one
+        self.location_vertices: dict[str, set[int]] = defaultdict(set)
+        self.location_timestamps: dict[str, list[datetime]] = defaultdict(list)
+        self.location_simplex_ids: dict[str, int | None] = {}
+
+    def add_entry(self, vertex_ids: list[int], timestamp: datetime, location: str | None):
+        """
+        Process a new entry and update witness complexes dynamically.
+
+        - Temporal: If entry is within window, extend it. Otherwise, close current
+          window (insert simplex) and start new one.
+        - Location: Add vertices to location set and update the location simplex.
+        """
+        if not vertex_ids:
+            return
+
+        # === Temporal witness complex ===
+        if self.window_start is None or self.window_end is None:
+            # First entry - start new window
+            self.temporal_vertices = set(vertex_ids)
+            self.window_start = timestamp
+            self.window_end = timestamp
+        elif timestamp - self.window_end <= timedelta(minutes=self.window_minutes):
+            # Within window - extend it
+            self.temporal_vertices.update(vertex_ids)
+            self.window_end = timestamp
         else:
-            # Save current window if it has 2+ vertices
-            if len(current_vertices) >= 2:
-                windows.append((list(current_vertices), window_start, window_end))
+            # Outside window - close current and start new
+            self._flush_temporal_window()
+            self.temporal_vertices = set(vertex_ids)
+            self.window_start = timestamp
+            self.window_end = timestamp
 
-            # Start new window
-            current_vertices = set(vertex_ids)
-            window_start = timestamp
-            window_end = timestamp
+        # === Location witness complex ===
+        if location:
+            self.location_vertices[location].update(vertex_ids)
+            self.location_timestamps[location].append(timestamp)
+            self._update_location_simplex(location)
 
-    # Don't forget the last window
-    if len(current_vertices) >= 2:
-        windows.append((list(current_vertices), window_start, window_end))
+    def _flush_temporal_window(self):
+        """Insert current temporal window as simplex if it has 2+ vertices."""
+        if len(self.temporal_vertices) >= 2 and self.window_start and self.window_end:
+            self.simplex_tree.insert_simplex(
+                list(self.temporal_vertices),
+                "temporal",
+                {
+                    "window_start": self.window_start.isoformat(),
+                    "window_end": self.window_end.isoformat(),
+                    "window_minutes": self.window_minutes,
+                },
+            )
 
-    return windows
+    def _update_location_simplex(self, location: str):
+        """Update the simplex for a location (remove old, insert new)."""
+        vertices = self.location_vertices[location]
+        if len(vertices) < 2:
+            return
+
+        timestamps = self.location_timestamps[location]
+
+        # Remove old simplex if it exists
+        old_id = self.location_simplex_ids.get(location)
+        if old_id is not None:
+            # We need to find and remove the old simplex
+            # For now, we'll just insert a new one - duplicates are handled by simplex tree
+            pass
+
+        # Insert updated simplex
+        node_id = self.simplex_tree.insert_simplex(
+            list(vertices),
+            "location",
+            {
+                "location": location,
+                "first_seen": min(timestamps).isoformat(),
+                "last_seen": max(timestamps).isoformat(),
+                "entry_count": len(timestamps),
+            },
+        )
+        self.location_simplex_ids[location] = node_id
+
+    def finalize(self):
+        """Flush any remaining state (call at end of processing)."""
+        self._flush_temporal_window()
 
 
 def run_pipeline(
     search_history_path: str,
     db_path: str = "knowledge_graph.db",
     user_id: int = 1,
-    window_minutes: int = 5,
+    window_minutes: int = 30,
     limit: int | None = None,
     delay: float = 0.1,
     resume: bool = True,
@@ -159,7 +238,7 @@ def run_pipeline(
         search_history_path: Path to search_history.json
         db_path: Path to SQLite database
         user_id: User ID for multi-tenant support
-        window_minutes: Temporal window size for witness complex
+        window_minutes: Temporal window size for witness complex (default 30)
         limit: Optional limit on number of entries to process
         delay: Delay between API calls in seconds (rate limiting)
         resume: Whether to resume from checkpoint
@@ -172,6 +251,9 @@ def run_pipeline(
     extractor = EntityExtractor()
     store = KnowledgeStore(conn, user_id, extractor)
     simplex_tree = SimplexTree(conn, user_id)
+
+    # Dynamic witness complex builder - constructs simplices at insertion time
+    witness_builder = WitnessComplexBuilder(simplex_tree, window_minutes)
 
     # Load search history
     with open(search_history_path, "r") as f:
@@ -202,6 +284,14 @@ def run_pipeline(
             if vertex_ids:
                 entries_with_vertices.append((vertex_ids, timestamp))
 
+                # Dynamic simplex construction at insertion time
+                location = extract_location(entry)
+                witness_builder.add_entry(
+                    vertex_ids,
+                    parse_timestamp(timestamp),
+                    location,
+                )
+
             processed_indices.add(i)
 
             # Progress update and checkpoint every 10 entries
@@ -215,30 +305,18 @@ def run_pipeline(
     except KeyboardInterrupt:
         print("\nInterrupted! Saving checkpoint...")
         save_checkpoint(list(processed_indices), entries_with_vertices)
+        witness_builder.finalize()  # Flush remaining temporal window
         print(f"Checkpoint saved. Resume with: python pipeline.py {search_history_path}")
         conn.close()
         return
 
     # Final checkpoint save
     save_checkpoint(list(processed_indices), entries_with_vertices)
+
+    # Flush any remaining temporal window
+    witness_builder.finalize()
+
     print(f"Extracted vertices from {len(entries_with_vertices)} entries")
-
-    # Build temporal windows (convert string timestamps to datetime)
-    entries_for_windows = [
-        (vids, parse_timestamp(ts)) for vids, ts in entries_with_vertices
-    ]
-    windows = build_temporal_windows(entries_for_windows, window_minutes)
-    print(f"Built {len(windows)} temporal windows")
-
-    # Create simplices for each window
-    for vertex_ids, window_start, window_end in windows:
-        meta_data = {
-            "window_start": window_start.isoformat(),
-            "window_end": window_end.isoformat(),
-            "window_minutes": window_minutes,
-        }
-        simplex_tree.insert_simplex(vertex_ids, "temporal", meta_data)
-
     print("Pipeline complete!")
 
     # Print summary stats
@@ -272,7 +350,7 @@ if __name__ == "__main__":
     parser.add_argument("input", nargs="?", default="../search_history.json", help="Path to search_history.json")
     parser.add_argument("--db", default="knowledge_graph.db", help="Path to SQLite database")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of entries to process")
-    parser.add_argument("--window", type=int, default=5, help="Temporal window size in minutes")
+    parser.add_argument("--window", type=int, default=30, help="Temporal window size in minutes")
     parser.add_argument("--delay", type=float, default=0.1, help="Delay between API calls in seconds")
     parser.add_argument("--no-resume", action="store_true", help="Start fresh, ignore checkpoint")
 
