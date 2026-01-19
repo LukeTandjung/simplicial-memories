@@ -18,6 +18,8 @@
             python313
             python313Packages.euporie
             python313Packages.git-filter-repo
+            python313Packages.pydantic
+            python313Packages.uv
           ];
         };
       });
