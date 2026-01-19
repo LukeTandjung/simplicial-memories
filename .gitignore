@@ -5,3 +5,4 @@ main.typ
 __pycache__/
 *.pyc
 *.db
+checkpoint.json
