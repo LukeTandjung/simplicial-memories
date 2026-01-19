@@ -2,3 +2,6 @@
 main.typ
 .env
 .venv
+__pycache__/
+*.pyc
+*.db
