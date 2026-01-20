@@ -10,6 +10,7 @@ Implements Section VI of the paper:
 import json
 import math
 import sqlite3
+from collections import defaultdict
 from dataclasses import dataclass
 
 from extraction import EntityExtractor
@@ -39,6 +40,7 @@ class Coface:
     vertex_ids: list[int]
     simplex_type: str  # "temporal" or "location"
     meta_data: dict
+    query_vertex_id: int  # which matched vertex led to this coface
 
 
 @dataclass
@@ -83,15 +85,25 @@ class KnowledgeRetriever:
                 edges=[],
             )
 
-        # Step 2: Coface Lookup
-        vertex_ids = [v.vertex_id for v in matched_vertices]
-        raw_cofaces = self.simplex_tree.locate_cofaces(vertex_ids, include_metadata=True)
+        # Step 2: Coface Lookup - iterate over EACH matched vertex
+        # Per paper Section VI: "For each vertex in Q, we find all simplices containing it"
+        cofaces: list[Coface] = []
+        seen_cofaces: set[tuple[int, ...]] = set()  # deduplicate
 
-        # Convert to Coface objects
-        cofaces = [
-            Coface(vertex_ids=vids, simplex_type=stype, meta_data=meta)
-            for vids, stype, meta in raw_cofaces
-        ]
+        for matched_v in matched_vertices:
+            raw_cofaces = self.simplex_tree.locate_cofaces(
+                [matched_v.vertex_id], include_metadata=True
+            )
+            for vids, stype, meta in raw_cofaces:
+                coface_key = tuple(sorted(vids))
+                if coface_key not in seen_cofaces:
+                    seen_cofaces.add(coface_key)
+                    cofaces.append(Coface(
+                        vertex_ids=vids,
+                        simplex_type=stype,
+                        meta_data=meta,
+                        query_vertex_id=matched_v.vertex_id,
+                    ))
 
         # Collect all vertices in cofaces
         all_vertex_ids = set()
@@ -99,7 +111,8 @@ class KnowledgeRetriever:
             all_vertex_ids.update(coface.vertex_ids)
 
         # Step 3: Filtration Comparison (Gap Detection)
-        knowledge_gaps = self.detect_gaps([c.vertex_ids for c in cofaces])
+        # TODO: Disabled - O(2^n) explosion for large simplices
+        knowledge_gaps: list[list[int]] = []
 
         # Step 4: Build context
         context_vertices = self._get_vertex_contents(all_vertex_ids)
@@ -234,22 +247,33 @@ class KnowledgeRetriever:
 
         if result.cofaces:
             lines.append("\n=== Co-occurrence Patterns (Simplices) ===")
-            for coface in result.cofaces[:10]:  # Limit to 10
-                contents = [result.context_vertices.get(vid, str(vid)) for vid in coface.vertex_ids]
 
-                # Format context based on simplex type
-                match coface.simplex_type:
-                    case "temporal":
-                        start = coface.meta_data.get("window_start", "?")
-                        end = coface.meta_data.get("window_end", "?")
-                        context = f"from {start} to {end}"
-                    case "location":
-                        loc = coface.meta_data.get("location", "?")
-                        context = f"at {loc}"
-                    case _:
-                        context = coface.simplex_type
+            # Group cofaces by query vertex
+            cofaces_by_query: dict[int, list[Coface]] = defaultdict(list)
+            for coface in result.cofaces:
+                cofaces_by_query[coface.query_vertex_id].append(coface)
 
-                lines.append(f"  - [{context}] {{{', '.join(contents)}}}")
+            for query_vid, coface_group in list(cofaces_by_query.items())[:10]:
+                query_content = result.context_vertices.get(query_vid, str(query_vid))
+                lines.append(f"\n  From '{query_content}':")
+
+                for coface in coface_group[:10]:
+                    contents = [result.context_vertices.get(vid, str(vid)) for vid in coface.vertex_ids]
+
+                    # Format context based on simplex type
+                    match coface.simplex_type:
+                        case "temporal":
+                            start = coface.meta_data.get("window_start", "?")
+                            end = coface.meta_data.get("window_end", "?")
+                            context = f"from {start} to {end}"
+                        case "location":
+                            loc = coface.meta_data.get("location", "?")
+                            context = f"at {loc}"
+                        case _:
+                            context = coface.simplex_type
+
+                    dim = len(coface.vertex_ids) - 1
+                    lines.append(f"    [{dim}-simplex] [{context}] {{{', '.join(contents)}}}")
 
         if result.edges:
             lines.append("\n=== Known Relationships ===")

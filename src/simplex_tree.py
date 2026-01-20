@@ -118,16 +118,19 @@ class SimplexTree:
 
     @overload
     def locate_cofaces(
-        self, vertex_ids: list[int], include_metadata: Literal[False] = False
+        self, vertex_ids: list[int], include_metadata: Literal[False] = False,
+        max_extra_depth: int | None = None,
     ) -> list[list[int]]: ...
 
     @overload
     def locate_cofaces(
-        self, vertex_ids: list[int], include_metadata: Literal[True]
+        self, vertex_ids: list[int], include_metadata: Literal[True],
+        max_extra_depth: int | None = None,
     ) -> list[tuple[list[int], str, dict]]: ...
 
     def locate_cofaces(
-        self, vertex_ids: list[int], include_metadata: bool = False
+        self, vertex_ids: list[int], include_metadata: bool = False,
+        max_extra_depth: int | None = 0,
     ) -> list[list[int]] | list[tuple[list[int], str, dict]]:
         """
         Find all simplices containing vertex set. Complexity: O(k T log n)
@@ -135,6 +138,7 @@ class SimplexTree:
         Args:
             vertex_ids: Vertices that must be contained in the simplex
             include_metadata: If True, return (vertices, type, meta_data) tuples
+            max_extra_depth: Limit subtree traversal depth (default 2, None for unlimited)
 
         Returns:
             List of vertex ID lists, or list of (vertices, type, meta_data) tuples
@@ -165,11 +169,15 @@ class SimplexTree:
                         json.loads(candidate["meta_data"]),
                     ))
                     cofaces.extend(self._collect_subtree(
-                        candidate["node_id"], path, include_metadata=True
+                        candidate["node_id"], path, include_metadata=True,
+                        max_extra_depth=max_extra_depth,
                     ))
                 else:
                     cofaces.append(path)
-                    cofaces.extend(self._collect_subtree(candidate["node_id"], path))
+                    cofaces.extend(self._collect_subtree(
+                        candidate["node_id"], path,
+                        max_extra_depth=max_extra_depth,
+                    ))
 
         return cofaces
 
@@ -195,8 +203,13 @@ class SimplexTree:
         root_id: int,
         root_verts: list[int],
         include_metadata: bool = False,
+        max_extra_depth: int | None = None,
+        current_extra_depth: int = 0,
     ) -> list[list[int]] | list[tuple[list[int], str, dict]]:
-        """Collect all simplices in subtree."""
+        """Collect simplices in subtree, optionally limited by depth."""
+        if max_extra_depth is not None and current_extra_depth >= max_extra_depth:
+            return []
+
         children = self.conn.execute(
             "SELECT node_id, vertex_id, type, meta_data FROM simplex_vertex WHERE parent_id = ?",
             (root_id,),
@@ -212,11 +225,17 @@ class SimplexTree:
                     json.loads(child["meta_data"]),
                 ))
                 results.extend(self._collect_subtree(
-                    child["node_id"], child_verts, include_metadata=True
+                    child["node_id"], child_verts, include_metadata=True,
+                    max_extra_depth=max_extra_depth,
+                    current_extra_depth=current_extra_depth + 1,
                 ))
             else:
                 results.append(child_verts)
-                results.extend(self._collect_subtree(child["node_id"], child_verts))
+                results.extend(self._collect_subtree(
+                    child["node_id"], child_verts,
+                    max_extra_depth=max_extra_depth,
+                    current_extra_depth=current_extra_depth + 1,
+                ))
 
         return results
 
