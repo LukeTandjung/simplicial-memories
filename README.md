@@ -58,4 +58,4 @@ uv run python retrieval.py "What hotel was I looking at in Jodhpur?" --top-k 10 
 
 3. **Retrieval**: Queries are embedded and matched to vertices. Coface lookup surfaces related entities from the same simplices. Gap detection identifies missing faces (uncertain inferences).
 
-See `paper/simplex_representation.ipynb` for detailed documentation.
+See `paper/simplex_representation.ipynb` for detailed documentation, and `paper/main.pdf` for the actual paper.
