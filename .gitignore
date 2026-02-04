@@ -1,5 +1,4 @@
 .direnv/
-main.typ
 .env
 .venv
 __pycache__/
