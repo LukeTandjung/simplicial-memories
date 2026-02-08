@@ -6,7 +6,7 @@
 #show: ieee.with(
   title: [
     Memory has Many Faces: Simplicial
-    Complexes as a Agent Memory Layer
+    Complexes as an Indexing Layer for Agent Memory
   ],
   abstract: [
     This paper proposes simplicial complexes as a high-order representation of
@@ -28,33 +28,28 @@
 )
 
 = Introduction
-Almost all current state of the art agent memory architectures make use of vector or graph data models for storing
-chunked text extracted from conversation sessions. Architectures such as Supermemory combines semantic search on memories
-linked to extracted text chunks with relational knowledge chains to map how memories evolve over time.
+Current state-of-the-art agent memory architectures vary in data modelling approaches for storing chunked text. Some use
+memories linked together in relational knowledge chains for hierarchical retrieval of raw text chunks @supermemory2025.
+Others create separate semantic memory graphs for epistemic categorisation, with typed edges @latimer2025. Finally, some
+choose not to have any indexing structure at all @emergence2025. At their core, these approaches aim to allow relationships
+between different text chunks to be expressed, while retaining powerful semantic similarity search features. We argue that
+this type of relationship modelling -- representing relationships as binary edge interactions between memories -- is
+representationally incomplete. Robust agent memory architecture must also capture co-occurrence.
 
-Neither of these data models are representationally complete.
+Here, co-occurrence refers to the joint relationship that arises between more than two entities in the same context
+@salnikov2018. Some examples of it are multiple topics or events referenced in a single chat message, multiple people in a
+group conversation, or multiple events happening closely in time or space. When projecting co-occurrence onto
+semantic graph structures, information about joint relationships is lost @salnikov2018.
 
+Most agent memory architectures handle this implicitly. Observed approaches include injecting raw text chunks
+to preserve chat session co-occurrence @emergence2025@supermemory2025, storing time-of-event fields in memories for temporal
+co-occurrence @supermemory2025, and using typed graph edges for semantic, temporal, and causal co-occurrence @latimer2025. In
+this paper, we propose simplicial complexes in the form of simplex trees as an indexing structure for co-occurrence. Rather
+than fully relying on raw text chunks or constructing hierarchical indexes, simplex trees capture observed co-occurrence
+directly, enabling complete retrieval without dynamic graph traversal. We begin by motivating the choice of simplicial
+complexes through the lens of category theory.
 
-What are some of the current competitive (SOTA) memory architectures out there?
-"Hybrid memory architectures achieve strong results but at the cost of engineering
-complexity and retrieval coordination. We investigate whether a single, mathematically
-grounded representation—simplicial complexes—can consolidate these capabilities while
-maintaining competitive performance."
-
-On LongMemEval, RAG systems achieve 86% accuracy while
-graph-based methods reach only 71% @emergence2025.
-
-When three or more entities
-co-occur meaningfully, such as multiple concepts in a
-conversation, or events in a session, pairwise graphs
-either discard this information @salnikov2018 or attempt
-reconstruction through secondary inference @benson2018.
-Even frameworks like SER fail to resolve it.
-Recent attempts at formalising this information loss
-include Wang and Kleinberg (2024), which proved the
-combinatorial impossibility of recovering higher-order
-structures from graph projections @wang2024.
-
+#colbreak()
 
 = Motivation: A Category Theoretic Lens
 
