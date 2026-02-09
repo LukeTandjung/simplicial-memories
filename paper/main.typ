@@ -47,7 +47,8 @@ co-occurrence @supermemory2025, and using typed graph edges for semantic, tempor
 this paper, we propose simplicial complexes in the form of simplex trees as an indexing structure for co-occurrence. Rather
 than fully relying on raw text chunks or constructing hierarchical indexes, simplex trees capture observed co-occurrence
 directly, enabling complete retrieval without dynamic graph traversal. We begin by motivating the choice of simplicial
-complexes through the lens of category theory.
+complexes through the lens of category theory. Readers primarily interested in the practical structure of simplicial complexes
+may skip to section 3.
 
 #colbreak()
 
@@ -322,26 +323,15 @@ tetrahedron a 3-simplex (@fig:simplex-dimensions).
     filled triangle, and tetrahedron.],
 ) <fig:simplex-dimensions>
 
-For agent memory, this aligns with how knowledge emerges
-from contexts. A chat or search session referencing
-entities "neural networks", "backpropagation", and "gradient
-descent" produces a $2$-simplex. By downward closure, this
-either creates edges for pairwise co-occurrences automatically,
-or implies the existence of co-occurences not yet uncovered,
-ensuring consistency. This idea is generalised in the structure
-of the simplicial complex through *facets*, which are the
-maximal dimension proper faces of a simplex. This involves
-taking the possible combinations of $k$ points of a
-$k$-simplex; a $3$-simplex $s={v_1, v_2, v_3, v_4}$ will
-have the facets ${v_1, v_2, v_3}$, ${v_2, v_3, v_4}$,
-${v_1, v_3, v_4}$, ${v_1, v_2, v_4}$. At the same time,
-the same simplex itself could be contained in another
-higher-dimensional simplices representing deeper structural pattern.
-Such a collection of higher-dimensional simplices are
-called *cofaces*; the cofaces of a $1$-simplex
-$s={v_1, v_2}$ could be something like ${v_1, v_2, v_3}$,
-${v_1, v_2, v_4}$, ${v_1, v_2, v_3, v_4}$. More examples
-are shown in @fig:facets-cofaces.
+For agent memory, this aligns with how knowledge emerges from contexts. A chat message referencing entities "neural networks",
+"backpropagation", and "gradient descent" produces a $2$-simplex. By downward closure, this implies the existence of
+co-occurence between each entity pair as $1$-simplex. This idea is generalised in the structure of the simplicial complex
+through *facets*, which are the maximal dimension proper faces of a simplex. This involves taking the possible combinations
+of $k$ points of a $k$-simplex; a $3$-simplex $s={v_1, v_2, v_3, v_4}$ will have the facets ${v_1, v_2, v_3}$, ${v_2, v_3, v_4}$,
+${v_1, v_3, v_4}$, ${v_1, v_2, v_4}$. At the same time, the same simplex itself could be contained in another higher-dimensional
+simplices representing deeper structural pattern. Such a collection of higher-dimensional simplices are called *cofaces*; the
+cofaces of a $1$-simplex $s={v_1, v_2}$ could be something like ${v_1, v_2, v_3}$, ${v_1, v_2, v_4}$, ${v_1, v_2, v_3, v_4}$.
+More examples are shown in @fig:facets-cofaces.
 
 #figure(
   cetz.canvas({
@@ -408,138 +398,19 @@ are shown in @fig:facets-cofaces.
     ${v_1, v_2}$ (highlighted in blue) are the 2-simplices containing it.],
 ) <fig:facets-cofaces>
 
-These structures support natural memory operations. Coface
-lookup retrieves higher-dimensional simplices containing
-a query, identifying stronger contextual and narrative
-associations. Facet traversal descends to lower-dimensional faces,
-broadening the search when specificity must be relaxed.
+These structures support natural memory operations. Coface lookup retrieves higher-dimensional simplices containing a query,
+identifying stronger contextual and narrative associations. Facet traversal descends to lower-dimensional faces, broadening
+the search when specificity must be relaxed.
 
-When an agent retrieves knowledge relevant to a query, the
-retrieved simplices form a *subcomplex*, a simplicial complex
-$K^(')=(V^('), S^('))$ satisfying $V^(') subset.eq V$ and $S^(') subset.eq S$.
-However, behavioral data does not arrive in face-respecting
-order. A user may discuss entities ${v_1, v_2, v_3}$ together
-before ever discussing ${v_1, v_2}$ in isolation. The
-downward closure property defines a simplicial complex
-mathematically, but operational efficiency favours a
-different approach: we insert only directly observed
-simplices without materializing implied faces. A
-conversation yielding co-occurring entities ${v_1, v_2, v_3}$
-produces a single 2-simplex insertion rather than the seven
-insertions required for full closure. At query time, faces
-that exist in the database represent independently confirmed
-co-occurrences, while faces computable from higher-dimensional
-simplices but absent from storage represent knowledge
-gaps—co-occurrences implied by context but never directly
-observed.
+When an agent retrieves knowledge relevant to a query, the retrieved simplices form a *subcomplex*, a simplicial complex
+$K^(')=(V^('), S^('))$ satisfying $V^(') subset.eq V$ and $S^(') subset.eq S$. Likewise, when a chat session is processed into
+text chunks, it creates a subcomplex, where each text chunk is a simplex. Then, by downward closure, we insert all cascading
+facets of the simplex, up to the $1$-simplex. A chat session extracted to two text chunks with entities ${v_1, v_2, v_3}$ and
+${v_3, v_4}$, for example, produces the subcomplex ${v_1, v_2, v_3}$, ${v_3, v_4}$ with cascading facets ${v_1, v_2}$,
+${v_2, v_3}$, ${v_1, v_3}$. Efficient storage and retrieval of these subcomplexes: supporting insertion, membership queries,
+and coface lookup—requires a data structure designed for simplicial complexes.
 
-Given a query-induced subcomplex formed by retrieving
-cofaces of semantically matched vertices, we enumerate the
-theoretical faces of each retrieved coface and check their
-existence in storage. Notably, we do _not_ enumerate all
-$2^n - 1$ faces of the matched vertex set directly; instead,
-gap detection operates within each coface independently.
-This preserves the clustering structure established during
-witness complex construction: each coface represents a
-coherent context (a temporal session or location), and
-gaps within that context signal missing relationships
-that share semantic grounding. Cross-context gaps (between
-vertices that never co-occurred in any coface) would lack
-this grounding and produce less actionable signals.
-
-Faces that are combinatorially required within a coface
-but absent from the database represent knowledge gaps
-local to that context: the system has evidence that
-entities co-occur in some higher-order relationship,
-but lacks direct confirmation of the supporting lower-order
-structure. The agent may then pose clarifying questions to
-confirm these missing relationships, or discount confidence
-in inferences that depend on unobserved faces.
-
-This integrates naturally with *filtration*. A filtration of
-simplicial complex $K$ is an ordering of $K$ such that all
-prefixes are subcomplexes of $K$. That is, for two simplices
-$sigma, tau$ in $K$ such that $sigma subset tau$, $sigma$
-appears before $tau$ in the ordering. For example, consider
-building a filled triangle ${v_1, v_2, v_3}$. A valid filtration
-orders the simplices as:
-
-$
-  {v_1} -> {v_2} -> {v_3} -> {v_1,v_2} -> \ {v_2,v_3} -> {v_1,v_3} -> {v_1,v_2,v_3}
-$
-
-Each prefix forms a valid subcomplex: vertices appear before
-edges, and edges before the filled face (@fig:filtration).
-
-#figure(
-  cetz.canvas({
-    import cetz.draw: *
-
-    // Step 1: vertices only
-    let y = 2.2
-    circle((0, y), radius: 0.08, fill: black)
-    circle((1, y), radius: 0.08, fill: black)
-    circle((0.5, y + 0.85), radius: 0.08, fill: black)
-    content((0.5, y - 0.5), $t_1$)
-
-    // Step 2: one edge
-    let x2 = 1.8
-    line((x2, y), (x2 + 1, y), stroke: black)
-    circle((x2, y), radius: 0.08, fill: black)
-    circle((x2 + 1, y), radius: 0.08, fill: black)
-    circle((x2 + 0.5, y + 0.85), radius: 0.08, fill: black)
-    content((x2 + 0.5, y - 0.5), $t_2$)
-
-    // Step 3: two edges
-    let x3 = 3.6
-    line((x3, y), (x3 + 1, y), stroke: black)
-    line((x3 + 1, y), (x3 + 0.5, y + 0.85), stroke: black)
-    circle((x3, y), radius: 0.08, fill: black)
-    circle((x3 + 1, y), radius: 0.08, fill: black)
-    circle((x3 + 0.5, y + 0.85), radius: 0.08, fill: black)
-    content((x3 + 0.5, y - 0.5), $t_3$)
-
-    // Step 4: three edges (empty triangle)
-    let x4 = 5.4
-    line((x4, y), (x4 + 1, y), stroke: black)
-    line((x4 + 1, y), (x4 + 0.5, y + 0.85), stroke: black)
-    line((x4 + 0.5, y + 0.85), (x4, y), stroke: black)
-    circle((x4, y), radius: 0.08, fill: black)
-    circle((x4 + 1, y), radius: 0.08, fill: black)
-    circle((x4 + 0.5, y + 0.85), radius: 0.08, fill: black)
-    content((x4 + 0.5, y - 0.5), $t_4$)
-
-    // Step 5: filled triangle
-    let x5 = 2.7
-    let y5 = 0
-    line(
-      (x5, y5),
-      (x5 + 1, y5),
-      (x5 + 0.5, y5 + 0.85),
-      close: true,
-      fill: rgb("#cce5ff"),
-      stroke: black,
-    )
-    circle((x5, y5), radius: 0.08, fill: black)
-    circle((x5 + 1, y5), radius: 0.08, fill: black)
-    circle((x5 + 0.5, y5 + 0.85), radius: 0.08, fill: black)
-    content((x5 + 0.5, y5 - 0.5), $t_5$)
-  }),
-  caption: [A filtration building a 2-simplex. At $t_1$, only vertices exist.
-    Edges are added at $t_2$-$t_4$. The filled 2-simplex appears at $t_5$,
-    only after all its faces exist.],
-) <fig:filtration>
-
-Rather than treating filtration as a global property,
-we compute it over the query-induced subcomplex.
-Closure-induced faces can be flagged for inference.
-The agent may then pose clarifying questions or bias search
-results to confirm missing relationships, or discount
-confidence in inferences that depend on closure-induced faces.
-The topology of the query-induced subcomplex thus serves
-not only as a retrieval mechanism but as an inference
-guide, directing attention toward gaps most relevant
-to the immediate task.
+#colbreak()
 
 = Simplex Trees
 The simplex tree, introduced by Boissonnat and Maria in
@@ -550,8 +421,6 @@ reconciles the need to explicitly store all faces of the
 complex with the desire for compact representation and
 efficient operations, making it particularly well-suited
 for database-backed memory systems.
-
-#pagebreak()
 
 For the simplicial complex $K=(V, S)$ of dimension $k$
 (that is, the dimension of the largest simplex in $K$), we label each vertice $v_i in V$ a letter
