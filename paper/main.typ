@@ -555,8 +555,9 @@ requiring disk persistence, this involves translating the in-memory tree into a 
 1. An in-memory simplex tree uses red-black trees or hash tables for the trie structure, with the top nodes being an array.
   However, red-black trees are not used as database indexes due to being optimised for in-memory operations rather than
   disk-based operations @du2023. Furthermore, the depth of a simplex tree could grow deeply, increasing disk I/O for
-  reads @kleppmann2018. Postgres offers the SP-GiST index out of the box, which addresses these problems. A breakdown of the
-  changes in time complexity between the in-memory simplex tree and the simplex tree index is given in @tbl:operations.
+  reads @kleppmann2018. Postgres offers the Space-Partitioned Generalised Search Tree (SP-GiST) index out of the box,
+  which addresses these problems. A breakdown of the changes in time complexity between the in-memory simplex tree and the
+  simplex tree index is given in @tbl:operations.
 
   #figure(
     table(
@@ -589,23 +590,33 @@ requiring disk persistence, this involves translating the in-memory tree into a 
       implementation vs. SP-GiST index.],
   ) <tbl:operations>
 
-  Here, $j$ is the simplex dimension, $k$ is the dimension
-  of the simplicial complex, $m$ is the number of matching
-  cofaces, and $T_("last"(s))^(> 0)$ is the total number
-  of nodes in the simplex tree storing $"last"(s)$, the
-  last letter of the simplex $s$, at a tree depth greater
-  than $0$. In practice, this value is bounded by
-  $C_({"last"(s)})$, the number of cofaces containing the
-  last letter of the simplex. The SP-GiST coface query
-  uses prefix matching, yielding $O(j + m)$ where $m$ is
-  the result set size, compared to the linked-list
-  traversal of the in-memory implementation.
-2. In the in-memory implementation, each sibling node has
-  a pointer to its parent node, and for all nodes in the
-  same tree depth of the same letter label $l_i$, they
-  are connected in a circular linked list. Both cases are
-  achievable in the relational model by using foreign-key
-  primary-key relations, which can be shown in greater
-  detail in the next section.
+  Here, $j$ is the simplex dimension, $k$ is the dimension of the simplicial complex, $m$ is the number of matching cofaces,
+  and $T_("last"(s))^(> 0)$ is the total number of nodes in the simplex tree storing $"last"(s)$, the last letter of the
+  simplex $s$, at a tree depth greater than $0$. In practice, this value is bounded by $C_({"last"(s)})$, the number of
+  cofaces containing the last letter of the simplex. The SP-GiST complexities follow from standard trie analysis @knuth1973.
+2. In the in-memory implementation, for all nodes in the same tree depth of the same letter label $l_i$, they
+  are connected in a circular linked list. This is an feature of the simplex tree we are unable to directly
+  translate over to the SP-GiST index. As a result, the SP-GiST coface query uses prefix matching, yielding $O(j + m)$ instead
+  of $O(k T^(>0)_("last"(v)))$ for coface search and retrieval.
+3. By downward closure, inserting all the faces of a $j$-simplex subcomplex is $O(2^j)$. While this is computationally expensive,
+  chunking strategies can be used to drive down the cost. Suppose that in a large text chunk comprising of a conversation session,
+  we have $n$ entities $e_1, e_2, ..., e_n$. If the session is split into $c$ chunks of at most $m$ entities each (where $m << n$), the total insertion cost
+  becomes $O(c dot 2^m)$, which is significantly cheaper for small $m$. This motivates the use of chunking strategies that
+  produce semantically coherent segments with bounded entity counts:
+
+  - *Perplexity-based chunking* uses a language model to identify natural breakpoints where perplexity spikes indicate topic
+    shifts or logical discontinuity @zhao2024. This aligns well with simplex tree insertion, as topic boundaries naturally
+    delineate distinct co-occurrence contexts.
+  - *Semantic similarity chunking* embeds sentences or paragraphs, then clusters adjacent segments by similarity, merging
+    those above a threshold @kamradt2024. High-similarity segments are likely to share entities, producing coherent simplices.
+  - *Fixed-size chunking with overlap* splits text at a fixed token window (typically 500 to 1000 tokens) with 100 to 200 tokens
+    of overlap. The overlap prevents entity co-occurrences from being lost at chunk boundaries.
+  - *Late chunking* first embeds the full document through a long-context embedding model, then segments the embedding space
+    rather than the raw text @gunther2024. This preserves contextual information that would otherwise be lost at chunk
+    boundaries.
+
+  The choice of chunking strategy directly affects the dimension of the resulting simplices, and therefore the insertion cost.
+  Strategies that produce smaller, semantically coherent chunks keep $m$ low while preserving meaningful co-occurrence
+  relationships.
 
 = Database Design
