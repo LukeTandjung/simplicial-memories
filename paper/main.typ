@@ -142,9 +142,7 @@ triangle) or merely pairwise across contexts (an empty
 triangle) as seen in @fig:graph-vs-simplex. This presents an implication for agent memory,
 When users discuss multiple concepts together, these
 co-occurrences carry semantic significance beyond
-pairwise projections. Graph-based systems either discard
-this at storage or attempt reconstruction at retrieval,
-both degrading performance.
+pairwise projections.
 
 #figure(
   cetz.canvas({
@@ -413,13 +411,9 @@ and coface lookup—requires a data structure designed for simplicial complexes.
 #colbreak()
 
 = Simplex Trees
-The simplex tree, introduced by Boissonnat and Maria in
-2014, provides an efficient data structure for
-representing abstract simplicial complexes of
-arbitrary dimension@boissonnat2020. The simplex tree
-reconciles the need to explicitly store all faces of the
-complex with the desire for compact representation and
-efficient operations, making it particularly well-suited
+The simplex tree, introduced by Boissonnat and Maria in 2014, provides an efficient data structure for representing abstract
+simplicial complexes of arbitrary dimension @boissonnat2020. The simplex tree reconciles the need to explicitly store all
+faces of the complex with the desire for compact representation and efficient operations, making it particularly well-suited
 for database-backed memory systems.
 
 For the simplicial complex $K=(V, S)$ of dimension $k$
@@ -556,58 +550,56 @@ the tree as such (@fig:simplex-tree):
     to node encodes a simplex: e.g., $emptyset -> 1 -> 2 -> 3$ represents ${1,2,3}$.],
 ) <fig:simplex-tree>
 
-In the original Boissonnat and Maria paper, the simplex tree
-was implemented as an in-memory structure. While in-memory
-databases could host these structures directly, they are
-unsuitable for persistent agent memory: RAM costs more per gigabyte than SSD storage, and requires
-continuous power to retain state. In-memory stores excel as
-caches, not as primary memory layers that must persist
-across sessions and scale with conversation history.
-We therefore implement the simplex tree using disk-backed
-persistence. Translating the requirements of the in-memory
-tree required some unique considerations:
-1. An in-memory simplex tree uses red-black trees or hash
-  tables for the trie structure, with the top nodes being
-  an array. However, red-black trees are not used as database
-  indexes due to being optimised for in-memory operations
-  rather than disk-based operations@du2023. Hash indexes are thus
-  used in place, preserving the original time complexity of operations
-  in the paper. A breakdown of the time complexity of
-  operations in the persistent agent memory is given in @tbl:operations.
+In the original Boissonnat and Maria paper, the simplex tree was implemented as an in-memory structure. With agent memories
+requiring disk persistence, this involves translating the in-memory tree into a database index, with some unique considerations:
+1. An in-memory simplex tree uses red-black trees or hash tables for the trie structure, with the top nodes being an array.
+  However, red-black trees are not used as database indexes due to being optimised for in-memory operations rather than
+  disk-based operations @du2023. Furthermore, the depth of a simplex tree could grow deeply, increasing disk I/O for
+  reads @kleppmann2018. Postgres offers the SP-GiST index out of the box, which addresses these problems. A breakdown of the
+  changes in time complexity between the in-memory simplex tree and the simplex tree index is given in @tbl:operations.
 
   #figure(
     table(
-      columns: 3,
-      align: (left, left, left),
-      table.header([*Operation*], [*Purpose*], [*Complexity*]),
+      columns: 4,
+      align: (left, left, left, left),
+      table.header([*Operation*], [*Purpose*], [*In-memory*], [*SP-GiST*]),
       [Insert simplex],
       [Record observed co-occurrence from extraction],
+      [$O(j)$],
       [$O(j)$],
 
       [Membership check],
       [Verify whether a face exists during gap detection],
       [$O(j)$],
+      [$O(j)$],
 
       [Cofaces of vertex set],
       [Find all simplices containing query-matched vertices],
       [$O(k T^(>0)_("last"(v)))$],
+      [$O(j + m)$],
 
       [Enumerate theoretical faces],
       [Compute expected faces for filtration comparison],
       [$O(2^j)$],
+      [$O(2^j)$],
 
-      [Delete simplex], [Memory management, forgetting], [$O(j)$],
+      [Delete simplex], [Memory management, forgetting], [$O(j)$], [$O(j)$],
     ),
-    caption: [Time complexity of simplex tree operations.],
+    caption: [Time complexity of simplex tree operations: in-memory
+      implementation vs. SP-GiST index.],
   ) <tbl:operations>
 
   Here, $j$ is the simplex dimension, $k$ is the dimension
-  of the simplicial complex, and $T_("last"(s))^(> 0)$ is
-  the total number of nodes in the simplex tree storing
-  $"last"(s)$, the last letter of the simplex $s$, at a
-  tree depth greater than $0$. In practice, this value is
-  bounded by $C_({"last"(s)})$, the number of cofaces
-  containing the last letter of the simplex.
+  of the simplicial complex, $m$ is the number of matching
+  cofaces, and $T_("last"(s))^(> 0)$ is the total number
+  of nodes in the simplex tree storing $"last"(s)$, the
+  last letter of the simplex $s$, at a tree depth greater
+  than $0$. In practice, this value is bounded by
+  $C_({"last"(s)})$, the number of cofaces containing the
+  last letter of the simplex. The SP-GiST coface query
+  uses prefix matching, yielding $O(j + m)$ where $m$ is
+  the result set size, compared to the linked-list
+  traversal of the in-memory implementation.
 2. In the in-memory implementation, each sibling node has
   a pointer to its parent node, and for all nodes in the
   same tree depth of the same letter label $l_i$, they
@@ -617,104 +609,3 @@ tree required some unique considerations:
   detail in the next section.
 
 = Database Design
-We translate simplex trees to persistent database schemas
-with three core tables, adapting standard approaches to
-modelling graphs in relational models@kleppmann2018. The
-full schema definition is provided in the Appendix.
-
-#figure(
-  render(
-    ```
-    erDiagram
-      user_knowledge_vertex {
-        SERIAL vertex_id PK
-        INT user_id
-        FLOAT[] embedding
-        TEXT content
-        JSONB meta_data
-      }
-      user_knowledge_edge {
-        SERIAL edge_id PK
-        INT user_id
-        INT tail_vertex FK
-        INT head_vertex FK
-        FLOAT[] embedding
-        TEXT content
-      }
-      simplex_node {
-        SERIAL node_id PK
-        INT user_id
-        INT parent_id FK
-        INT vertex_id FK
-        INT depth
-        TEXT type
-      }
-      user_knowledge_edge }o--|| user_knowledge_vertex : tail_vertex
-      user_knowledge_edge }o--|| user_knowledge_vertex : head_vertex
-      simplex_node }o--|| user_knowledge_vertex : vertex_id
-      simplex_node }o--o| simplex_node : parent_id
-    ```.text,
-  ),
-  caption: [Entity-relationship diagram for the persistence layer. The
-    `simplex_node` table implements the trie structure with a self-referential
-    foreign key for parent traversal. Both `user_knowledge_edge` and
-    `simplex_node` reference vertices in `user_knowledge_vertex`.],
-) <fig:er-diagram>
-
-#pagebreak()
-
-= Appendix
-
-== Database Schema Definition <appendix:schema>
-
-```sql
-CREATE TABLE user_knowledge_vertex (
-    vertex_id   SERIAL PRIMARY KEY,
-    user_id     INT NOT NULL,
-    embedding   FLOAT[] NOT NULL,
-    content     TEXT NOT NULL,
-    meta_data   JSONB DEFAULT '{}'
-);
-
-CREATE TABLE user_knowledge_edge (
-    edge_id     SERIAL PRIMARY KEY,
-    user_id     INT NOT NULL,
-    tail_vertex INT REFERENCES user_knowledge_vertex(vertex_id),
-    head_vertex INT REFERENCES user_knowledge_vertex(vertex_id),
-    embedding   FLOAT[],
-    content     TEXT,
-    meta_data   JSONB DEFAULT '{}'
-);
-
-CREATE TABLE simplex_node (
-    node_id     SERIAL PRIMARY KEY,
-    user_id     INT NOT NULL,
-    parent_id   INT REFERENCES simplex_node(node_id),
-    vertex_id   INT REFERENCES user_knowledge_vertex(vertex_id),
-    depth       INT NOT NULL,
-    type        TEXT,
-    meta_data   JSONB DEFAULT '{}'
-);
-
--- Unique constraint handling NULL parent_id for root nodes
-CREATE UNIQUE INDEX idx_simplex_unique
-    ON simplex_node (user_id, parent_id, vertex_id)
-    WHERE parent_id IS NOT NULL;
-CREATE UNIQUE INDEX idx_simplex_root_unique
-    ON simplex_node (user_id, vertex_id)
-    WHERE parent_id IS NULL;
-
--- Child lookup (hash for O(1) expected)
-CREATE INDEX idx_children
-    ON simplex_node USING HASH (parent_id);
-
--- L_j(ℓ) lists: find all nodes referencing a vertex at given depth
-CREATE INDEX idx_vertex_depth
-    ON simplex_node (user_id, vertex_id, depth);
-
--- Parent traversal
-CREATE INDEX idx_parent
-    ON simplex_node (parent_id);
-```
-
-
