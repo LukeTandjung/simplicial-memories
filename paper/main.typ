@@ -598,11 +598,13 @@ requiring disk persistence, this involves translating the in-memory tree into a 
   are connected in a circular linked list. This is an feature of the simplex tree we are unable to directly
   translate over to the SP-GiST index. As a result, the SP-GiST coface query uses prefix matching, yielding $O(j + m)$ instead
   of $O(k T^(>0)_("last"(v)))$ for coface search and retrieval.
-3. By downward closure, inserting all the faces of a $j$-simplex subcomplex is $O(2^j)$. While this is computationally expensive,
+3. By downward closure, inserting all the faces of a $j$-subcomplex is $O(2^j)$. While this is computationally expensive,
   chunking strategies can be used to drive down the cost. Suppose that in a large text chunk comprising of a conversation session,
-  we have $n$ entities $e_1, e_2, ..., e_n$. If the session is split into $c$ chunks of at most $m$ entities each (where $m << n$), the total insertion cost
-  becomes $O(c dot 2^m)$, which is significantly cheaper for small $m$. This motivates the use of chunking strategies that
-  produce semantically coherent segments with bounded entity counts:
+  we have $n$ entities $e_1, e_2, ..., e_n$. A chunking strategy partitions these into $c$ disjoint subsets
+  $E_1, E_2, ..., E_c$ where $|E_i| <= m$ and $union.big_(i=1)^(c) E_i = {e_1, ..., e_n}$. The total insertion cost is then
+  $sum_(i=1)^(c) O(2^(|E_i|)) <= O(c dot 2^m)$, compared to $O(2^n)$ for the unsplit session. For $m << n$, this is
+  significantly cheaper. This motivates the use of chunking strategies that produce semantically coherent segments with bounded
+  entity counts:
 
   - *Perplexity-based chunking* uses a language model to identify natural breakpoints where perplexity spikes indicate topic
     shifts or logical discontinuity @zhao2024. This aligns well with simplex tree insertion, as topic boundaries naturally
